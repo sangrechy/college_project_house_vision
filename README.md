@@ -10,7 +10,7 @@
 This repository contains the complete codebase and architecture for **House Vision**, structured into two iterative versions alongside ready-to-install Android APKs:
 
 ```
-project_housevision/
+college_project_housevision/
 ├── apks/                               # Pre-compiled Android application packages (APKs)
 │   ├── house_vision_v1.apk             # Baseline v1 APK (compiled & installable)
 │   └── house_vision_v2.apk             # Next-gen v2 Prototype APK (compiled & installable)
@@ -81,7 +81,7 @@ This repository is pre-configured and ready to be pushed to your GitHub reposito
 
 ### 1. Open Terminal at the Project Root
 ```powershell
-cd E:\PROJECTS\project_housevision
+cd E:\PROJECTS\college_project_housevision
 ```
 
 ### 2. Initialize Git Repository
@@ -117,24 +117,24 @@ git push -u origin main
 Connect your Android phone (or launch your emulator) and run:
 ```powershell
 # To install v2 (Recommended prototype):
-adb install -r E:\PROJECTS\project_housevision\apks\house_vision_v2.apk
+adb install -r E:\PROJECTS\college_project_housevision\apks\house_vision_v2.apk
 
 # To install v1 (Baseline):
-adb install -r E:\PROJECTS\project_housevision\apks\house_vision_v1.apk
+adb install -r E:\PROJECTS\college_project_housevision\apks\house_vision_v1.apk
 ```
 
 ### Option B: Run from Source via Flutter CLI
 
 #### Running v2 (Prototype):
 ```powershell
-cd E:\PROJECTS\project_housevision\v2\application
+cd E:\PROJECTS\college_project_housevision\v2\application
 flutter pub get
 flutter run
 ```
 
 #### Running v1 (Baseline):
 ```powershell
-cd E:\PROJECTS\project_housevision\v1\application
+cd E:\PROJECTS\college_project_housevision\v1\application
 flutter pub get
 flutter run
 ```
@@ -147,12 +147,12 @@ Both versions have been verified with 0 build errors:
 
 ```powershell
 # Analyze and test v2:
-cd E:\PROJECTS\project_housevision\v2\application
+cd E:\PROJECTS\college_project_housevision\v2\application
 flutter analyze
 flutter test
 
 # Analyze and test v1:
-cd E:\PROJECTS\project_housevision\v1\application
+cd E:\PROJECTS\college_project_housevision\v1\application
 dart analyze
 flutter test
 ```
