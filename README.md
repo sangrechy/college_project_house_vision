@@ -15,13 +15,14 @@ project_housevision/
 │   ├── house_vision_v1.apk             # Baseline v1 APK (compiled & installable)
 │   └── house_vision_v2.apk             # Next-gen v2 Prototype APK (compiled & installable)
 │
-├── application/
-│   ├── .trashed_v1/                    # Baseline Flutter Concept Architecture (Legacy/Trashed)
-│   │   ├── lib/                        # Early prototype screens, AR viewer & models
-│   │   ├── android/                    # Cleaned Android Gradle build configuration
-│   │   └── pubspec.yaml                # v1 package dependencies
-│   │
-│   └── v2/                             # Next-Generation Production Prototype
+├── v1/                                 # Baseline Version 1 Architecture (Concept)
+│   └── application/                    # Early prototype Flutter application
+│       ├── lib/                        # Early prototype screens, AR viewer & models
+│       ├── android/                    # Cleaned Android Gradle build configuration
+│       └── pubspec.yaml                # v1 package dependencies
+│
+├── v2/                                 # Next-Generation Version 2 Architecture (Production Prototype)
+│   └── application/                    # Modern layered Flutter application
 │       ├── lib/
 │       │   ├── core/                   # Architectural Dark Studio theme, HUD telemetry atoms
 │       │   ├── domain/                 # Domain entities, ML inspection models, repository contracts
@@ -76,7 +77,7 @@ To keep the repository clean and avoid committing gigabytes of cache and generat
 ## 🛠️ Step-by-Step Git Upload Instructions
 
 This repository is pre-configured and ready to be pushed to your GitHub repository:
-**`https://github.com/sangrechy/collage_project_sem5_ccp_mad_house_vision.git`**
+**`https://github.com/sangrechy/college_project_house_vision.git`**
 
 ### 1. Open Terminal at the Project Root
 ```powershell
@@ -104,7 +105,7 @@ git commit -m "feat: complete House Vision v1 baseline and v2 dark studio protot
 ### 5. Link GitHub Remote and Push
 ```powershell
 git branch -M main
-git remote add origin https://github.com/sangrechy/collage_project_sem5_ccp_mad_house_vision.git
+git remote add origin https://github.com/sangrechy/college_project_house_vision.git
 git push -u origin main
 ```
 
@@ -126,14 +127,14 @@ adb install -r E:\PROJECTS\project_housevision\apks\house_vision_v1.apk
 
 #### Running v2 (Prototype):
 ```powershell
-cd E:\PROJECTS\project_housevision\application\v2
+cd E:\PROJECTS\project_housevision\v2\application
 flutter pub get
 flutter run
 ```
 
-#### Running v1 (Baseline / Trashed):
+#### Running v1 (Baseline):
 ```powershell
-cd E:\PROJECTS\project_housevision\application\.trashed_v1
+cd E:\PROJECTS\project_housevision\v1\application
 flutter pub get
 flutter run
 ```
@@ -146,12 +147,12 @@ Both versions have been verified with 0 build errors:
 
 ```powershell
 # Analyze and test v2:
-cd E:\PROJECTS\project_housevision\application\v2
+cd E:\PROJECTS\project_housevision\v2\application
 flutter analyze
 flutter test
 
 # Analyze and test v1:
-cd E:\PROJECTS\project_housevision\application\.trashed_v1
+cd E:\PROJECTS\project_housevision\v1\application
 dart analyze
 flutter test
 ```
