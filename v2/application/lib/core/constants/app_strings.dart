@@ -7,10 +7,9 @@ abstract final class AppStrings {
   static const String defaultProjectLocation = 'Coimbatore, Tamil Nadu';
 
   // Asset Paths
-  static const String modelHouseGlb = 'assets/models/house.glb';
+  static const String modelHouseGlb = 'assets/models/house_ar.glb';
   static const String modelHouseArGlb = 'assets/models/house_ar.glb';
   static const String modelNeferGlb = 'assets/models/nefer.glb';
-  static const String modelHousePng = 'assets/models/house.png';
 
   // Firestore Collections
   static const String colProjects = 'projects';

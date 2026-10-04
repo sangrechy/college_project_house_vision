@@ -57,14 +57,16 @@ class _LoginScreenState extends State<LoginScreen> {
                     // Brand Header
                     Center(
                       child: Container(
-                        padding: const EdgeInsets.all(18),
+                        padding: const EdgeInsets.all(22),
                         decoration: BoxDecoration(
-                          color: AppColors.primaryLight.withValues(alpha: 0.5),
+                          color: AppColors.surface,
                           shape: BoxShape.circle,
+                          boxShadow: AppColors.neumorphicShadow,
+                          border: Border.all(color: Colors.white, width: 2),
                         ),
                         child: const Icon(
                           Icons.home_work_rounded,
-                          size: 48,
+                          size: 46,
                           color: AppColors.primary,
                         ),
                       ),

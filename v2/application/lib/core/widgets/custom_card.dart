@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../constants/app_colors.dart';
 
-/// Clean rounded container card with optional tap handler and border styling.
+/// Neumorphic Soft UI rounded container card with dual bevel shadows.
 class CustomCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -9,6 +9,7 @@ class CustomCard extends StatelessWidget {
   final Color backgroundColor;
   final Color borderColor;
   final double borderRadius;
+  final List<BoxShadow>? customShadows;
 
   const CustomCard({
     super.key,
@@ -17,7 +18,8 @@ class CustomCard extends StatelessWidget {
     this.onTap,
     this.backgroundColor = AppColors.surface,
     this.borderColor = AppColors.border,
-    this.borderRadius = 18,
+    this.borderRadius = 20,
+    this.customShadows,
   });
 
   @override
@@ -27,14 +29,8 @@ class CustomCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: backgroundColor,
         borderRadius: BorderRadius.circular(borderRadius),
-        border: Border.all(color: borderColor, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        border: Border.all(color: borderColor, width: 0.8),
+        boxShadow: customShadows ?? AppColors.neumorphicShadow,
       ),
       child: child,
     );

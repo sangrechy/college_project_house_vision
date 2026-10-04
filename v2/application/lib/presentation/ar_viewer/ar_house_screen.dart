@@ -420,7 +420,7 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
               ),
             ),
 
-          // Layer 3: Interactive 3D Model Viewport (Transparent ModelViewer)
+          // Layer 3: Interactive 3D Model Viewport (Transparent in CAM AR, Solid Canvas in STUDIO)
           Positioned.fill(
             child: KeyedSubtree(
               key: ValueKey('${_selectedModel.name}_$_scaleMultiplier'),
@@ -433,7 +433,9 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
                     : 'BIM Spatial Model',
                 autoRotate: false,
                 cameraControls: true,
-                backgroundColor: Colors.transparent,
+                backgroundColor: _isCameraMode ? Colors.transparent : AppColors.scaffoldBackground,
+                loading: Loading.eager,
+                reveal: Reveal.auto,
                 scale: '$_scaleMultiplier $_scaleMultiplier $_scaleMultiplier',
                 shadowIntensity: 1.0,
                 ar: true,
@@ -441,7 +443,7 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
                 arScale: ArScale.auto,
                 arPlacement: ArPlacement.floor,
                 innerModelViewerHtml: '''
-                  <button slot="ar-button" id="ar-button" style="position: absolute; bottom: 190px; right: 20px; background: linear-gradient(135deg, #00E5FF, #0077FF); color: #000; border: none; padding: 12px 20px; border-radius: 26px; font-weight: 800; font-size: 13px; letter-spacing: 0.5px; box-shadow: 0 4px 18px rgba(0,229,255,0.55); display: flex; align-items: center; gap: 8px; cursor: pointer; z-index: 99999;">
+                  <button slot="ar-button" id="ar-button" style="position: absolute; bottom: 190px; right: 20px; background: linear-gradient(135deg, #FF7A30, #ED8943); color: #fff; border: none; padding: 12px 20px; border-radius: 26px; font-weight: 800; font-size: 13px; letter-spacing: 0.5px; box-shadow: 0 4px 18px rgba(237,137,67,0.55); display: flex; align-items: center; gap: 8px; cursor: pointer; z-index: 99999;">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4c0-1.1.9-2 2-2h4v2H5v4H3V4zm0 16c0 1.1.9 2 2 2h4v-2H5v-4H3v4zm16 2c1.1 0 2-.9 2-2v-4h-2v4h-4v2h4zm2-18c0-1.1-.9-2-2-2h-4v2h4v4h2V4zm-9 4l5 3v6l-5 3-5-3v-6l5-3z"/></svg>
                     VIEW IN ROOM (AR)
                   </button>
@@ -468,22 +470,23 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
 
           // Layer 5: Dual Model Selector (Nefer AI Guide vs BIM House)
           Positioned(
-            top: 60,
+            top: 64,
             left: 16,
             right: 16,
             child: Container(
-              padding: const EdgeInsets.all(3),
+              padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
-                color: AppColors.surface.withValues(alpha: 0.94),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.borderHighlight),
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.border, width: 0.8),
+                boxShadow: AppColors.neumorphicPillShadow,
               ),
               child: Row(
                 children: [
                   Expanded(
                     child: _buildModelTab(
                       title: 'Nefer (AI Guide)',
-                      subtitle: '1:1 Human Avatar (10MB)',
+                      subtitle: '1:1 Human Avatar (2.9MB Opt)',
                       icon: Icons.person_rounded,
                       isSelected: _selectedModel == ARModelTarget.neferGuide,
                       onTap: () {
@@ -496,11 +499,11 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
                       },
                     ),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: _buildModelTab(
                       title: 'BIM House (Site)',
-                      subtitle: 'Architectural LOD 400',
+                      subtitle: 'Architectural LOD 400 (2.1MB)',
                       icon: Icons.apartment_rounded,
                       isSelected: _selectedModel == ARModelTarget.bimHouse,
                       onTap: () {
@@ -520,15 +523,16 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
 
           // Layer 6: Status & Attitude Telemetry Pill
           Positioned(
-            top: 108,
+            top: 122,
             left: 16,
             right: 16,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: AppColors.surface.withValues(alpha: 0.92),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.borderHighlight),
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.border, width: 0.8),
+                boxShadow: AppColors.neumorphicPillShadow,
               ),
               child: Row(
                 children: [
@@ -594,16 +598,10 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
             child: Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: AppColors.surface.withValues(alpha: 0.94),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: AppColors.borderHighlight, width: 1.2),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.45),
-                    blurRadius: 18,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: AppColors.border, width: 0.8),
+                boxShadow: AppColors.neumorphicShadow,
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -697,22 +695,31 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
         onTap: () => setState(() => _scaleMultiplier = scaleVal),
         borderRadius: BorderRadius.circular(8),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
-            color: isSelected ? AppColors.primary.withValues(alpha: 0.15) : AppColors.surfaceElevated,
-            borderRadius: BorderRadius.circular(8),
+            color: isSelected ? AppColors.primary : AppColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: isSelected ? AppColors.primary : AppColors.border,
-              width: 1,
+              width: 0.8,
             ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: AppColors.primary.withValues(alpha: 0.35),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ]
+                : AppColors.neumorphicPillShadow,
           ),
           child: Text(
             label,
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 10.5,
-              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-              color: isSelected ? AppColors.primary : AppColors.textSecondary,
+              fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+              color: isSelected ? Colors.white : AppColors.textPrimary,
             ),
           ),
         ),
@@ -729,17 +736,18 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(9),
+      borderRadius: BorderRadius.circular(12),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary.withValues(alpha: 0.18) : Colors.transparent,
-          borderRadius: BorderRadius.circular(9),
+          color: isSelected ? AppColors.primary.withValues(alpha: 0.14) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected ? AppColors.primary : Colors.transparent,
-            width: 1,
+            width: 1.2,
           ),
+          boxShadow: isSelected ? AppColors.neumorphicPillShadow : null,
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -859,7 +867,7 @@ class _SpatialGroundGridPainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height * 0.62);
 
     final shadowPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.55)
+      ..color = const Color(0xFFA6B4C8).withValues(alpha: 0.55)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 16);
 
     final shadowRect = Rect.fromCenter(
@@ -870,7 +878,7 @@ class _SpatialGroundGridPainter extends CustomPainter {
     canvas.drawOval(shadowRect, shadowPaint);
 
     final gridPaint = Paint()
-      ..color = const Color(0xFF00D2FF).withValues(alpha: 0.12)
+      ..color = AppColors.primary.withValues(alpha: 0.20)
       ..strokeWidth = 1.0;
 
     const lineSpacing = 32.0;
@@ -890,7 +898,7 @@ class _SpatialGroundGridPainter extends CustomPainter {
     }
 
     final ringPaint = Paint()
-      ..color = const Color(0xFF00D2FF).withValues(alpha: 0.22)
+      ..color = AppColors.primary.withValues(alpha: 0.35)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.2;
 

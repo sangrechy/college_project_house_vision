@@ -64,9 +64,10 @@ class _House3DViewerScreenState extends State<House3DViewerScreen> {
             height: 420,
             width: double.infinity,
             decoration: BoxDecoration(
-              color: const Color(0xFFDFF1FF),
+              color: AppColors.surface,
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: AppColors.border),
+              border: Border.all(color: AppColors.border, width: 0.8),
+              boxShadow: AppColors.neumorphicShadow,
             ),
             clipBehavior: Clip.antiAlias,
             child: Stack(
@@ -77,7 +78,9 @@ class _House3DViewerScreenState extends State<House3DViewerScreen> {
                   autoRotate: _autoRotate,
                   cameraControls: true,
                   cameraOrbit: _currentOrbit,
-                  backgroundColor: Colors.transparent,
+                  backgroundColor: AppColors.surface,
+                  loading: Loading.eager,
+                  reveal: Reveal.auto,
                 ),
                 const Positioned(
                   top: 14,
