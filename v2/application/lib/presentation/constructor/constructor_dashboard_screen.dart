@@ -9,6 +9,7 @@ import '../../domain/repositories/project_repository.dart';
 import '../ar_viewer/ar_house_screen.dart';
 import '../auth/role_selection_screen.dart';
 import '../customization/customize_house_screen.dart';
+import '../floorplan/floorplan_2d_to_3d_screen.dart';
 import '../model_3d/house_3d_screen.dart';
 import '../verification/construction_check_screen.dart';
 import '../verification/reality_verification_screen.dart';
@@ -364,6 +365,63 @@ class _ConstructorDashboardView extends StatelessWidget {
                       backgroundColor: AppColors.surfaceVariant,
                       valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
                     ),
+                  ),
+                ],
+              ),
+            ),
+
+            // 2D to 3D BIM Extruder Card
+            CustomCard(
+              backgroundColor: AppColors.surface,
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryLight,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(
+                      Icons.architecture_rounded,
+                      color: AppColors.primary,
+                      size: 28,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '2D Blueprint → 3D BIM Extruder',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Parametric CAD floorplan to 3D construction twin',
+                          style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const Floorplan2DTo3DScreen()),
+                      );
+                    },
+                    child: const Text('Extrude 3D', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                   ),
                 ],
               ),

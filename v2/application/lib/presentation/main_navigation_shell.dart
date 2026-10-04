@@ -4,11 +4,12 @@ import '../domain/models/user_role.dart';
 import 'ar_viewer/ar_house_screen.dart';
 import 'constructor/constructor_dashboard_screen.dart';
 import 'customization/customize_house_screen.dart';
+import 'floorplan/floorplan_2d_to_3d_screen.dart';
 import 'homeowner/homeowner_dashboard_screen.dart';
 import 'verification/reality_verification_screen.dart';
 
 /// Main Architectural Shell with persistent bottom navigation dock.
-/// Hosts Dashboard, 3D BIM Studio, AI Vision Lab, and AR Projector.
+/// Hosts Dashboard, 2D→3D Builder, 3D BIM Studio, AI Vision Lab, and AR Projector.
 class MainNavigationShell extends StatefulWidget {
   final UserRole role;
   final int initialIndex;
@@ -40,6 +41,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
 
     final screens = <Widget>[
       dashboard,
+      const Floorplan2DTo3DScreen(),
       const CustomizeHouseScreen(),
       const RealityVerificationScreen(),
       const ARHouseScreen(),
@@ -59,7 +61,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.4),
+              color: Colors.black.withValues(alpha: 0.1),
               blurRadius: 16,
               offset: const Offset(0, -4),
             ),
@@ -67,14 +69,15 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
         ),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _buildNavItem(0, Icons.dashboard_outlined, Icons.dashboard_rounded, 'Dashboard'),
-                _buildNavItem(1, Icons.view_in_ar_outlined, Icons.view_in_ar_rounded, '3D Studio'),
-                _buildNavItem(2, Icons.document_scanner_outlined, Icons.document_scanner_rounded, 'AI Vision'),
-                _buildNavItem(3, Icons.layers_outlined, Icons.layers_rounded, 'AR Projector'),
+                _buildNavItem(1, Icons.architecture_outlined, Icons.architecture_rounded, '2D→3D'),
+                _buildNavItem(2, Icons.view_in_ar_outlined, Icons.view_in_ar_rounded, '3D Studio'),
+                _buildNavItem(3, Icons.document_scanner_outlined, Icons.document_scanner_rounded, 'AI Vision'),
+                _buildNavItem(4, Icons.layers_outlined, Icons.layers_rounded, 'AR Projector'),
               ],
             ),
           ),

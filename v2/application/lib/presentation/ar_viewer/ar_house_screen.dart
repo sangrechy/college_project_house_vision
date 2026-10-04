@@ -486,7 +486,7 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
                   Expanded(
                     child: _buildModelTab(
                       title: 'Nefer (AI Guide)',
-                      subtitle: '1:1 Human Avatar (2.9MB Opt)',
+                      subtitle: 'Smooth PBR • 512px Face (5.3MB)',
                       icon: Icons.person_rounded,
                       isSelected: _selectedModel == ARModelTarget.neferGuide,
                       onTap: () {
@@ -503,7 +503,7 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
                   Expanded(
                     child: _buildModelTab(
                       title: 'BIM House (Site)',
-                      subtitle: 'Architectural LOD 400 (2.1MB)',
+                      subtitle: 'Single Mesh Twin (971KB)',
                       icon: Icons.apartment_rounded,
                       isSelected: _selectedModel == ARModelTarget.bimHouse,
                       onTap: () {
