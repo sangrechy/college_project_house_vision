@@ -348,18 +348,28 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
           // Background Layer 1: Live Optical Camera (CAM AR Mode) or Dark Studio Grid
           if (_isCameraMode && _isCameraReady && _cameraController != null)
             Positioned.fill(
-              child: ClipRect(
-                child: OverflowBox(
-                  alignment: Alignment.center,
-                  child: FittedBox(
-                    fit: BoxFit.cover,
-                    child: SizedBox(
-                      width: _cameraController!.value.previewSize?.height ?? 1080,
-                      height: _cameraController!.value.previewSize?.width ?? 1920,
-                      child: CameraPreview(_cameraController!),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final camera = _cameraController!;
+                  if (!camera.value.isInitialized) return const SizedBox.shrink();
+
+                  final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+                  final previewRatio = isLandscape ? camera.value.aspectRatio : (1 / camera.value.aspectRatio);
+                  final screenRatio = constraints.maxWidth / constraints.maxHeight;
+
+                  final scale = previewRatio > screenRatio
+                      ? (previewRatio / screenRatio)
+                      : (screenRatio / previewRatio);
+
+                  return ClipRect(
+                    child: Center(
+                      child: Transform.scale(
+                        scale: scale,
+                        child: CameraPreview(camera),
+                      ),
                     ),
-                  ),
-                ),
+                  );
+                },
               ),
             )
           else if (_isCameraMode && !_isCameraReady)
@@ -413,7 +423,7 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
           // Layer 3: Interactive 3D Model Viewport (Transparent ModelViewer)
           Positioned.fill(
             child: KeyedSubtree(
-              key: ValueKey(_selectedModel),
+              key: ValueKey('${_selectedModel.name}_$_scaleMultiplier'),
               child: ModelViewer(
                 src: _selectedModel == ARModelTarget.neferGuide
                     ? AppStrings.modelNeferGlb
@@ -424,6 +434,8 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
                 autoRotate: false,
                 cameraControls: true,
                 backgroundColor: Colors.transparent,
+                scale: '$_scaleMultiplier $_scaleMultiplier $_scaleMultiplier',
+                shadowIntensity: 1.0,
                 ar: true,
                 arModes: const ['scene-viewer', 'webxr', 'quick-look'],
                 arScale: ArScale.auto,
