@@ -1,5 +1,8 @@
+import 'dart:convert';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 
 import '../../core/constants/app_colors.dart';
@@ -7,6 +10,7 @@ import '../../core/constants/app_strings.dart';
 import '../../core/widgets/custom_card.dart';
 import '../../core/widgets/hud_telemetry_bar.dart';
 import '../../core/widgets/status_badge.dart';
+import '../../data/services/floorplan_3d_extruder.dart';
 import '../ar_viewer/ar_house_screen.dart';
 
 /// Preset blueprint layouts for 2D to 3D construction
@@ -147,12 +151,108 @@ class _Floorplan2DTo3DScreenState extends State<Floorplan2DTo3DScreen> {
   RoomZone? _selectedRoom;
   bool _showDimensions = true;
 
+  // Real 2D to 3D Extrusion State
+  Uint8List? _uploadedBlueprintBytes;
+  List<DetectedRoom>? _customDetectedRooms;
+  bool _isCustomPlan = false;
+  String? _extrudedGlbDataUri;
+  bool _isExtruding = false;
+  final ImagePicker _picker = ImagePicker();
+
   final List<String> _wallMaterials = [
     'Scandinavian Timber',
     'Exposed Red Brick',
     'Cast Concrete',
     'Architectural Stucco',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _regenerateGlb();
+  }
+
+  List<DetectedRoom> _getActiveRooms() {
+    if (_isCustomPlan && _customDetectedRooms != null && _customDetectedRooms!.isNotEmpty) {
+      return _customDetectedRooms!;
+    }
+    return _selectedPreset.rooms.map((r) {
+      return DetectedRoom(
+        name: r.name,
+        x: r.relativeRect.left * 11.0,
+        y: r.relativeRect.top * 9.75,
+        width: r.relativeRect.width * 11.0,
+        length: r.relativeRect.height * 9.75,
+        areaSqFt: r.areaSqFt,
+      );
+    }).toList();
+  }
+
+  void _regenerateGlb() {
+    try {
+      final rooms = _getActiveRooms();
+      final glbBytes = Floorplan3dExtruder.generateGlb(
+        rooms: rooms,
+        wallHeight: _wallHeight,
+        wallMaterial: _wallMaterial,
+      );
+      final base64Str = base64Encode(glbBytes);
+      setState(() {
+        _extrudedGlbDataUri = 'data:model/gltf-binary;base64,$base64Str';
+      });
+    } catch (e) {
+      debugPrint('[Floorplan2DTo3D] Error generating procedural GLB: $e');
+    }
+  }
+
+  Future<void> _pickBlueprintImage(ImageSource source) async {
+    try {
+      final picked = await _picker.pickImage(
+        source: source,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 85,
+      );
+      if (picked == null) return;
+
+      setState(() => _isExtruding = true);
+
+      final bytes = await picked.readAsBytes();
+      final detectedRooms = Floorplan3dExtruder.analyzeFloorplanImage(bytes);
+
+      setState(() {
+        _uploadedBlueprintBytes = bytes;
+        _customDetectedRooms = detectedRooms;
+        _isCustomPlan = true;
+        _selectedRoom = null;
+        _isExtruding = false;
+      });
+
+      _regenerateGlb();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Real 2D→3D Extrusion: Analyzed plan with ${detectedRooms.length} room zones!',
+            ),
+            backgroundColor: AppColors.primary,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[Floorplan2DTo3D] Error processing image: $e');
+      if (mounted) {
+        setState(() => _isExtruding = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to process floorplan: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -184,12 +284,16 @@ class _Floorplan2DTo3DScreenState extends State<Floorplan2DTo3DScreen> {
           ),
           const SizedBox(height: 12),
 
+          // Blueprint Input Source Card (Camera/Gallery CV scan)
+          _buildBlueprintSourceCard(),
+          const SizedBox(height: 10),
+
           // Plan Preset Selector
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
               children: _presets.map((preset) {
-                final isSelected = preset.id == _selectedPreset.id;
+                final isSelected = !_isCustomPlan && preset.id == _selectedPreset.id;
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: ChoiceChip(
@@ -210,7 +314,9 @@ class _Floorplan2DTo3DScreenState extends State<Floorplan2DTo3DScreen> {
                           _selectedPreset = preset;
                           _wallHeight = preset.defaultWallHeight;
                           _selectedRoom = null;
+                          _isCustomPlan = false;
                         });
+                        _regenerateGlb();
                       }
                     },
                   ),
@@ -244,6 +350,117 @@ class _Floorplan2DTo3DScreenState extends State<Floorplan2DTo3DScreen> {
     );
   }
 
+  Widget _buildBlueprintSourceCard() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border, width: 0.8),
+        boxShadow: AppColors.neumorphicPillShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.document_scanner_rounded, size: 18, color: AppColors.primary),
+                  SizedBox(width: 8),
+                  Text(
+                    '2D Blueprint Input (Real-time CV Engine)',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+                  ),
+                ],
+              ),
+              if (_isCustomPlan)
+                InkWell(
+                  onTap: () {
+                    setState(() {
+                      _isCustomPlan = false;
+                      _uploadedBlueprintBytes = null;
+                      _customDetectedRooms = null;
+                      _wallHeight = _selectedPreset.defaultWallHeight;
+                    });
+                    _regenerateGlb();
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppColors.error.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      'Reset to Preset',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.error),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Upload a floorplan drawing or photo of a sketched blueprint. On-device lightweight CV analyzes wall contours and dynamically compiles a 3D BIM glTF mesh.',
+            style: TextStyle(fontSize: 11, color: AppColors.textSecondary, height: 1.35),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  icon: const Icon(Icons.photo_library_outlined, size: 16),
+                  label: const Text('Upload Blueprint', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
+                  onPressed: _isExtruding ? null : () => _pickBlueprintImage(ImageSource.gallery),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  icon: const Icon(Icons.camera_alt_outlined, size: 16),
+                  label: const Text('Capture Sketch', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
+                  onPressed: _isExtruding ? null : () => _pickBlueprintImage(ImageSource.camera),
+                ),
+              ),
+            ],
+          ),
+          if (_isCustomPlan) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.primary.withValues(alpha: 0.3), width: 0.8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle_rounded, size: 16, color: AppColors.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Custom Plan Active: ${_customDetectedRooms?.length ?? 0} Rooms detected & procedurally extruded to 3D!',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.primary),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildConstructionViewport() {
     return Container(
       height: 380,
@@ -259,15 +476,75 @@ class _Floorplan2DTo3DScreenState extends State<Floorplan2DTo3DScreen> {
         children: [
           if (_currentStage == ConstructionStage.complete3D)
             // Stage 5: Full 3D BIM House rendered via WebGL
-            const ModelViewer(
-              src: AppStrings.modelHouseArGlb,
-              alt: '3D Extruded Architectural House',
-              autoRotate: true,
-              cameraControls: true,
-              backgroundColor: AppColors.scaffoldBackground,
-              loading: Loading.eager,
-              reveal: Reveal.auto,
-              shadowIntensity: 0.9,
+            if (_isExtruding)
+              const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: AppColors.primary),
+                    SizedBox(height: 12),
+                    Text(
+                      'Extruding 3D BIM Mesh on Device...',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              KeyedSubtree(
+                key: ValueKey('glb_${_extrudedGlbDataUri.hashCode}_${_wallHeight.toStringAsFixed(1)}_$_wallMaterial'),
+                child: ModelViewer(
+                  src: _extrudedGlbDataUri ?? AppStrings.modelHouseArGlb,
+                  alt: '3D Extruded Architectural Model',
+                  autoRotate: true,
+                  cameraControls: true,
+                  backgroundColor: AppColors.scaffoldBackground,
+                  loading: Loading.eager,
+                  reveal: Reveal.auto,
+                  shadowIntensity: 0.9,
+                  ar: true,
+                  arModes: const ['scene-viewer', 'webxr', 'quick-look'],
+                ),
+              )
+          else if (_isCustomPlan && _uploadedBlueprintBytes != null && _currentStage == ConstructionStage.blueprint2D)
+            Stack(
+              fit: StackFit.expand,
+              children: [
+                Center(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Image.memory(
+                      _uploadedBlueprintBytes!,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 14,
+                  right: 14,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface.withValues(alpha: 0.92),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.border, width: 0.8),
+                    ),
+                    child: Text(
+                      '${_customDetectedRooms?.length ?? 0} ROOMS DETECTED',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primary,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             )
           else
             // Stages 1-4: Interactive 2D Schematic / Extrusion Simulation Canvas
@@ -515,6 +792,7 @@ class _Floorplan2DTo3DScreenState extends State<Floorplan2DTo3DScreen> {
             inactiveColor: AppColors.border,
             onChanged: (val) {
               setState(() => _wallHeight = val);
+              _regenerateGlb();
             },
           ),
           const SizedBox(height: 10),
@@ -543,7 +821,10 @@ class _Floorplan2DTo3DScreenState extends State<Floorplan2DTo3DScreen> {
                 selectedColor: AppColors.accentOrange,
                 backgroundColor: AppColors.surface,
                 onSelected: (val) {
-                  if (val) setState(() => _wallMaterial = mat);
+                  if (val) {
+                    setState(() => _wallMaterial = mat);
+                    _regenerateGlb();
+                  }
                 },
               );
             }).toList(),
@@ -653,44 +934,84 @@ class _Floorplan2DTo3DScreenState extends State<Floorplan2DTo3DScreen> {
   }
 
   Widget _buildArLaunchButton() {
-    return Container(
-      width: double.infinity,
-      height: 56,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.accentOrange.withValues(alpha: 0.35),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          height: 54,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.accentOrange.withValues(alpha: 0.35),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
-        ],
-      ),
-      child: ElevatedButton.icon(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.accentOrange,
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          elevation: 0,
-        ),
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const ARHouseScreen(),
+          child: ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.accentOrange,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              elevation: 0,
             ),
-          );
-        },
-        icon: const Icon(Icons.view_in_ar_rounded, size: 22),
-        label: const Text(
-          'PROJECT IN REAL-WORLD AR (SITE ANCHOR)',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.8,
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ARHouseScreen(
+                    customGlbSrc: _extrudedGlbDataUri,
+                    initialPlacementMode: ARPlacementMode.wallBaseAnchor,
+                    modelTitle: _isCustomPlan ? 'Custom Extruded 2D→3D' : _selectedPreset.name,
+                  ),
+                ),
+              );
+            },
+            icon: const Icon(Icons.vertical_align_bottom_rounded, size: 22),
+            label: const Text(
+              'MOUNT BASE ON WALL (AR)',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.8,
+              ),
+            ),
           ),
         ),
-      ),
+        const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.primary,
+              side: const BorderSide(color: AppColors.primary, width: 1.5),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            ),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ARHouseScreen(
+                    customGlbSrc: _extrudedGlbDataUri,
+                    initialPlacementMode: ARPlacementMode.floorAnchor,
+                    modelTitle: _isCustomPlan ? 'Custom Extruded 2D→3D' : _selectedPreset.name,
+                  ),
+                ),
+              );
+            },
+            icon: const Icon(Icons.layers_rounded, size: 20),
+            label: const Text(
+              'PROJECT ON FLOOR GROUND (AR)',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -25,7 +25,7 @@ void main() {
     // Verify brand header and tagline render
     expect(find.text(AppStrings.appName), findsOneWidget);
     expect(find.text(AppStrings.appTagline), findsOneWidget);
-    expect(find.text('Sign In & Choose Role'), findsOneWidget);
+    expect(find.text('SIGN IN TO DASHBOARD'), findsOneWidget);
 
     // Verify quick persona buttons render
     expect(find.text('Homeowner'), findsOneWidget);

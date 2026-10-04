@@ -10,13 +10,29 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/widgets/hud_telemetry_bar.dart';
 
+enum ARPlacementMode {
+  floorAnchor,      // Standard floor plane (horizontal)
+  wallBaseAnchor,   // Wall plane with base attached to wall (vertical wall, 90deg tilt)
+  wallSideAnchor,   // Wall plane with elevation attached to wall (vertical wall, 0deg)
+}
+
 enum ARModelTarget {
   bimHouse,
   neferGuide,
+  customExtruded,
 }
 
 class ARHouseScreen extends StatefulWidget {
-  const ARHouseScreen({super.key});
+  final String? customGlbSrc;
+  final ARPlacementMode initialPlacementMode;
+  final String? modelTitle;
+
+  const ARHouseScreen({
+    super.key,
+    this.customGlbSrc,
+    this.initialPlacementMode = ARPlacementMode.floorAnchor,
+    this.modelTitle,
+  });
 
   @override
   State<ARHouseScreen> createState() => _ARHouseScreenState();
@@ -31,6 +47,9 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
 
   // Mode: CAM AR (Live optical background) vs STUDIO (Architectural dark grid)
   bool _isCameraMode = false; // Default to STUDIO for guaranteed rendering across Web/Desktop/Mobile
+
+  // Surface Placement: Floor vs Wall (Base on Wall) vs Wall (Side)
+  late ARPlacementMode _placementMode;
 
   // Real-time Hardware & Simulated Sensor Telemetry
   StreamSubscription<AccelerometerEvent>? _accelSub;
@@ -47,7 +66,7 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
   DateTime _lastSensorUpdate = DateTime.now();
 
   // Model & AR Spatial State
-  ARModelTarget _selectedModel = ARModelTarget.neferGuide;
+  late ARModelTarget _selectedModel;
   double _scaleMultiplier = 1.0;
   double _rotationAngle = 45.0; // 0 to 360 deg
   double _sunHour = 14.0; // 7:00 to 18:00
@@ -62,6 +81,15 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
   @override
   void initState() {
     super.initState();
+    _placementMode = widget.initialPlacementMode;
+    if (widget.customGlbSrc != null) {
+      _selectedModel = ARModelTarget.customExtruded;
+      _statusMessage = _placementMode == ARPlacementMode.wallBaseAnchor
+          ? 'Extruded BIM Model: Base Anchored to Wall Surface'
+          : 'Extruded BIM Model: Ground Plane Anchored';
+    } else {
+      _selectedModel = ARModelTarget.neferGuide;
+    }
     _initSensors();
     // Only attempt camera init if supported platform or user toggles CAM AR
     if (!kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS)) {
@@ -404,6 +432,8 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
                   rotationDeg: _rotationAngle,
                   shadowOffset: Offset(shadowOffsetX, shadowOffsetY),
                   scaleFactor: _scaleMultiplier,
+                  isWallMount: _placementMode != ARPlacementMode.floorAnchor,
+                  isBaseOnWall: _placementMode == ARPlacementMode.wallBaseAnchor,
                 ),
               ),
             ),
@@ -416,6 +446,7 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
                   pitch: _pitchDeg,
                   roll: _rollDeg,
                   scale: _scaleMultiplier,
+                  isWallMount: _placementMode != ARPlacementMode.floorAnchor,
                 ),
               ),
             ),
@@ -423,14 +454,10 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
           // Layer 3: Interactive 3D Model Viewport (Transparent in CAM AR, Solid Canvas in STUDIO)
           Positioned.fill(
             child: KeyedSubtree(
-              key: ValueKey('${_selectedModel.name}_$_scaleMultiplier'),
+              key: ValueKey('${_selectedModel.name}_${_placementMode.name}_$_scaleMultiplier'),
               child: ModelViewer(
-                src: _selectedModel == ARModelTarget.neferGuide
-                    ? AppStrings.modelNeferGlb
-                    : AppStrings.modelHouseArGlb,
-                alt: _selectedModel == ARModelTarget.neferGuide
-                    ? 'Nefer • AI Site Assistant & BIM Guide'
-                    : 'BIM Spatial Model',
+                src: _getModelSrc(),
+                alt: _getModelAlt(),
                 autoRotate: false,
                 cameraControls: true,
                 backgroundColor: _isCameraMode ? Colors.transparent : AppColors.scaffoldBackground,
@@ -441,11 +468,16 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
                 ar: true,
                 arModes: const ['scene-viewer', 'webxr', 'quick-look'],
                 arScale: ArScale.auto,
-                arPlacement: ArPlacement.floor,
+                arPlacement: _placementMode == ARPlacementMode.floorAnchor
+                    ? ArPlacement.floor
+                    : ArPlacement.wall,
+                orientation: _placementMode == ARPlacementMode.wallBaseAnchor
+                    ? '90deg 0deg 0deg'
+                    : '0deg 0deg 0deg',
                 innerModelViewerHtml: '''
                   <button slot="ar-button" id="ar-button" style="position: absolute; bottom: 190px; right: 20px; background: linear-gradient(135deg, #FF7A30, #ED8943); color: #fff; border: none; padding: 12px 20px; border-radius: 26px; font-weight: 800; font-size: 13px; letter-spacing: 0.5px; box-shadow: 0 4px 18px rgba(237,137,67,0.55); display: flex; align-items: center; gap: 8px; cursor: pointer; z-index: 99999;">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4c0-1.1.9-2 2-2h4v2H5v4H3V4zm0 16c0 1.1.9 2 2 2h4v-2H5v-4H3v4zm16 2c1.1 0 2-.9 2-2v-4h-2v4h-4v2h4zm2-18c0-1.1-.9-2-2-2h-4v2h4v4h2V4zm-9 4l5 3v6l-5 3-5-3v-6l5-3z"/></svg>
-                    VIEW IN ROOM (AR)
+                    ${_placementMode == ARPlacementMode.wallBaseAnchor ? 'MOUNT BASE ON WALL (AR)' : (_placementMode == ARPlacementMode.wallSideAnchor ? 'MOUNT ON WALL (AR)' : 'VIEW IN ROOM (AR)')}
                   </button>
                 ''',
               ),
@@ -460,7 +492,9 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
             child: HudTelemetryBar(
               siteTag: _selectedModel == ARModelTarget.neferGuide
                   ? 'NEFER AI GUIDE • SPATIAL HUMAN ANCHOR'
-                  : 'AR SPATIAL PROJECTOR • BIM LOD 400',
+                  : (_selectedModel == ARModelTarget.customExtruded
+                      ? 'EXTRUDED 2D→3D BIM MODEL • LIVE ANCHOR'
+                      : 'AR SPATIAL PROJECTOR • BIM LOD 400'),
               coordinates: '11°01\'24.8"N 76°58\'12.4"E',
               isLiDarActive: true,
               headingDegrees: _headingDeg.round(),
@@ -468,7 +502,7 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
             ),
           ),
 
-          // Layer 5: Dual Model Selector (Nefer AI Guide vs BIM House)
+          // Layer 5: Model Target Selector (Nefer vs BIM House vs Extruded Custom)
           Positioned(
             top: 64,
             left: 16,
@@ -485,8 +519,8 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
                 children: [
                   Expanded(
                     child: _buildModelTab(
-                      title: 'Nefer (AI Guide)',
-                      subtitle: 'Smooth PBR • 512px Face (5.3MB)',
+                      title: 'Nefer (AI)',
+                      subtitle: 'PBR Avatar',
                       icon: Icons.person_rounded,
                       isSelected: _selectedModel == ARModelTarget.neferGuide,
                       onTap: () {
@@ -499,11 +533,11 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
                       },
                     ),
                   ),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 4),
                   Expanded(
                     child: _buildModelTab(
-                      title: 'BIM House (Site)',
-                      subtitle: 'Single Mesh Twin (971KB)',
+                      title: 'BIM Twin',
+                      subtitle: 'Single Mesh',
                       icon: Icons.apartment_rounded,
                       isSelected: _selectedModel == ARModelTarget.bimHouse,
                       onTap: () {
@@ -516,6 +550,69 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
                       },
                     ),
                   ),
+                  if (widget.customGlbSrc != null) ...[
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: _buildModelTab(
+                        title: '2D→3D Plan',
+                        subtitle: 'Extruded GLB',
+                        icon: Icons.architecture_rounded,
+                        isSelected: _selectedModel == ARModelTarget.customExtruded,
+                        onTap: () {
+                          setState(() {
+                            _selectedModel = ARModelTarget.customExtruded;
+                            _scaleMultiplier = 1.0;
+                            _statusMessage = 'Extruded Custom BIM House Active';
+                            _resetTapeMeasure();
+                          });
+                        },
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+
+          // Layer 5B: AR Surface Placement Mode (Floor vs Wall Base vs Wall Side)
+          Positioned(
+            top: 118,
+            left: 16,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.border, width: 0.8),
+                boxShadow: AppColors.neumorphicPillShadow,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _buildPlacementChip(
+                      title: 'Floor Anchor',
+                      icon: Icons.layers_rounded,
+                      mode: ARPlacementMode.floorAnchor,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: _buildPlacementChip(
+                      title: 'Base on Wall',
+                      icon: Icons.vertical_align_bottom_rounded,
+                      mode: ARPlacementMode.wallBaseAnchor,
+                      isHighlight: true,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: _buildPlacementChip(
+                      title: 'Elevation Wall',
+                      icon: Icons.view_sidebar_rounded,
+                      mode: ARPlacementMode.wallSideAnchor,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -523,7 +620,7 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
 
           // Layer 6: Status & Attitude Telemetry Pill
           Positioned(
-            top: 122,
+            top: 166,
             left: 16,
             right: 16,
             child: Container(
@@ -790,6 +887,100 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
       ),
     );
   }
+
+  String _getModelSrc() {
+    switch (_selectedModel) {
+      case ARModelTarget.neferGuide:
+        return AppStrings.modelNeferGlb;
+      case ARModelTarget.bimHouse:
+        return AppStrings.modelHouseArGlb;
+      case ARModelTarget.customExtruded:
+        return widget.customGlbSrc ?? AppStrings.modelHouseArGlb;
+    }
+  }
+
+  String _getModelAlt() {
+    switch (_selectedModel) {
+      case ARModelTarget.neferGuide:
+        return 'Nefer • AI Site Assistant & BIM Guide';
+      case ARModelTarget.bimHouse:
+        return 'BIM Spatial Model';
+      case ARModelTarget.customExtruded:
+        return widget.modelTitle ?? '2D-to-3D Extruded BIM Model';
+    }
+  }
+
+  Widget _buildPlacementChip({
+    required String title,
+    required IconData icon,
+    required ARPlacementMode mode,
+    bool isHighlight = false,
+  }) {
+    final isSelected = _placementMode == mode;
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _placementMode = mode;
+          if (mode == ARPlacementMode.wallBaseAnchor) {
+            _statusMessage = 'Wall Anchor Active: Base attaches flush to vertical wall!';
+          } else if (mode == ARPlacementMode.wallSideAnchor) {
+            _statusMessage = 'Wall Elevation Active: Back against vertical wall';
+          } else {
+            _statusMessage = 'Floor Anchor Active: Model rests horizontally on ground';
+          }
+        });
+      },
+      borderRadius: BorderRadius.circular(10),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? (isHighlight ? AppColors.accentOrange : AppColors.primary)
+              : AppColors.surfaceElevated,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isSelected
+                ? (isHighlight ? AppColors.accentOrange : AppColors.primary)
+                : AppColors.border,
+            width: 1.0,
+          ),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: (isHighlight ? AppColors.accentOrange : AppColors.primary).withValues(alpha: 0.35),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 14,
+              color: isSelected ? Colors.white : AppColors.textSecondary,
+            ),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: isSelected ? Colors.white : AppColors.textPrimary,
+                  fontSize: 10.5,
+                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// Holographic floor anchor painter for CAM AR mode
@@ -797,16 +988,52 @@ class _CamFloorAnchorPainter extends CustomPainter {
   final double pitch;
   final double roll;
   final double scale;
+  final bool isWallMount;
 
   _CamFloorAnchorPainter({
     required this.pitch,
     required this.roll,
     required this.scale,
+    this.isWallMount = false,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height * 0.72);
+    final center = Offset(size.width / 2, size.height * 0.60);
+
+    if (isWallMount) {
+      final rect = Rect.fromCenter(
+        center: center,
+        width: 220 * scale.clamp(0.5, 2.0),
+        height: 180 * scale.clamp(0.5, 2.0),
+      );
+
+      final framePaint = Paint()
+        ..color = const Color(0xFF00E5FF).withValues(alpha: 0.45)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5;
+
+      canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(12)), framePaint);
+
+      final baseLinePaint = Paint()
+        ..color = AppColors.accentOrange
+        ..strokeWidth = 2.5;
+
+      canvas.drawLine(Offset(rect.left, rect.bottom), Offset(rect.right, rect.bottom), baseLinePaint);
+
+      final textSpan = const TextSpan(
+        text: 'WALL PLANE • BASE MOUNT',
+        style: TextStyle(
+          color: Color(0xFF00E5FF),
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 1.0,
+        ),
+      );
+      final textPainter = TextPainter(text: textSpan, textDirection: TextDirection.ltr)..layout();
+      textPainter.paint(canvas, Offset(center.dx - textPainter.width / 2, rect.bottom + 6));
+      return;
+    }
 
     final ringPaint = Paint()
       ..color = const Color(0xFF00E5FF).withValues(alpha: 0.28)
@@ -846,7 +1073,10 @@ class _CamFloorAnchorPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _CamFloorAnchorPainter oldDelegate) {
-    return oldDelegate.pitch != pitch || oldDelegate.roll != roll || oldDelegate.scale != scale;
+    return oldDelegate.pitch != pitch ||
+        oldDelegate.roll != roll ||
+        oldDelegate.scale != scale ||
+        oldDelegate.isWallMount != isWallMount;
   }
 }
 
@@ -855,16 +1085,68 @@ class _SpatialGroundGridPainter extends CustomPainter {
   final double rotationDeg;
   final Offset shadowOffset;
   final double scaleFactor;
+  final bool isWallMount;
+  final bool isBaseOnWall;
 
   _SpatialGroundGridPainter({
     required this.rotationDeg,
     required this.shadowOffset,
     required this.scaleFactor,
+    this.isWallMount = false,
+    this.isBaseOnWall = false,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height * 0.62);
+    final center = Offset(size.width / 2, size.height * 0.56);
+
+    if (isWallMount) {
+      final wallRect = Rect.fromCenter(
+        center: Offset(center.dx, center.dy - 10),
+        width: size.width * 0.88,
+        height: size.height * 0.48,
+      );
+
+      final wallBackingPaint = Paint()
+        ..color = const Color(0xFF1E293B).withValues(alpha: 0.82)
+        ..style = PaintingStyle.fill;
+      canvas.drawRRect(RRect.fromRectAndRadius(wallRect, const Radius.circular(16)), wallBackingPaint);
+
+      final gridPaint = Paint()
+        ..color = AppColors.primary.withValues(alpha: 0.28)
+        ..strokeWidth = 1.0;
+
+      for (double x = wallRect.left + 24; x <= wallRect.right; x += 32) {
+        canvas.drawLine(Offset(x, wallRect.top), Offset(x, wallRect.bottom), gridPaint);
+      }
+      for (double y = wallRect.top + 24; y <= wallRect.bottom; y += 32) {
+        canvas.drawLine(Offset(wallRect.left, y), Offset(wallRect.right, y), gridPaint);
+      }
+
+      final datumPaint = Paint()
+        ..color = AppColors.accentOrange
+        ..strokeWidth = 2.5;
+
+      final datumY = isBaseOnWall ? (wallRect.bottom - 24) : (wallRect.top + 36);
+      canvas.drawLine(
+        Offset(wallRect.left + 16, datumY),
+        Offset(wallRect.right - 16, datumY),
+        datumPaint,
+      );
+
+      final textSpan = TextSpan(
+        text: isBaseOnWall ? '🧱 VERTICAL WALL SURFACE • BASE MOUNTED FLUSH' : '🧱 VERTICAL WALL • ELEVATION ANCHOR',
+        style: const TextStyle(
+          color: AppColors.accentOrange,
+          fontSize: 9.5,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.8,
+        ),
+      );
+      final textPainter = TextPainter(text: textSpan, textDirection: TextDirection.ltr)..layout();
+      textPainter.paint(canvas, Offset(center.dx - textPainter.width / 2, datumY + 6));
+      return;
+    }
 
     final shadowPaint = Paint()
       ..color = const Color(0xFFA6B4C8).withValues(alpha: 0.55)
@@ -910,7 +1192,9 @@ class _SpatialGroundGridPainter extends CustomPainter {
   bool shouldRepaint(covariant _SpatialGroundGridPainter oldDelegate) {
     return oldDelegate.rotationDeg != rotationDeg ||
         oldDelegate.shadowOffset != shadowOffset ||
-        oldDelegate.scaleFactor != scaleFactor;
+        oldDelegate.scaleFactor != scaleFactor ||
+        oldDelegate.isWallMount != isWallMount ||
+        oldDelegate.isBaseOnWall != isBaseOnWall;
   }
 }
 
