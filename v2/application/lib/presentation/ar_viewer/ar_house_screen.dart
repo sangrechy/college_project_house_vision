@@ -1,21 +1,19 @@
+import 'dart:async';
 import 'dart:math';
+import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:ar_flutter_plugin_plus/ar_flutter_plugin_plus.dart';
-import 'package:ar_flutter_plugin_plus/datatypes/config_planedetection.dart';
-import 'package:ar_flutter_plugin_plus/datatypes/node_types.dart';
-import 'package:ar_flutter_plugin_plus/managers/ar_anchor_manager.dart';
-import 'package:ar_flutter_plugin_plus/managers/ar_location_manager.dart';
-import 'package:ar_flutter_plugin_plus/managers/ar_object_manager.dart';
-import 'package:ar_flutter_plugin_plus/managers/ar_session_manager.dart';
-import 'package:ar_flutter_plugin_plus/models/ar_hittest_result.dart';
-import 'package:ar_flutter_plugin_plus/models/ar_node.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
-import 'package:vector_math/vector_math_64.dart' as vector;
+import 'package:sensors_plus/sensors_plus.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/widgets/hud_telemetry_bar.dart';
+
+enum ARModelTarget {
+  bimHouse,
+  neferGuide,
+}
 
 class ARHouseScreen extends StatefulWidget {
   const ARHouseScreen({super.key});
@@ -25,22 +23,37 @@ class ARHouseScreen extends StatefulWidget {
 }
 
 class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProviderStateMixin {
-  ARSessionManager? _sessionManager;
-  ARObjectManager? _objectManager;
-  ARNode? _houseNode;
+  // Camera & Background Viewport
+  CameraController? _cameraController;
+  bool _isCameraReady = false;
+  bool _cameraError = false;
+  String _cameraErrorMsg = '';
 
-  bool _housePlaced = false;
-  bool _isLoading = false;
-  bool _isSpatialStudioMode = true; // Default to Spatial Studio for reliable high-fidelity prototype
-  String _statusMessage = 'LiDAR Ground Plane Locked • Ready for Site Projection';
+  // Mode: CAM AR (Live optical background) vs STUDIO (Architectural dark grid)
+  bool _isCameraMode = false; // Default to STUDIO for guaranteed rendering across Web/Desktop/Mobile
 
-  // Interactive 3D Spatial Controls
-  double _scaleMultiplier = 1.0; // 1.0 = Tabletop 1:50, 2.0 = Field 1:20, 5.0 = True-Scale 1:1
-  double _rotationAngle = 45.0; // Degrees
-  final double _elevationHeight = 0.0; // Meters (-1.0m to +3.0m)
-  double _sunHour = 14.0; // 14:00 (2 PM sun angle)
+  // Real-time Hardware & Simulated Sensor Telemetry
+  StreamSubscription<AccelerometerEvent>? _accelSub;
+  StreamSubscription<MagnetometerEvent>? _magSub;
+  StreamSubscription<GyroscopeEvent>? _gyroSub;
+  Timer? _simulatedSensorTimer;
 
-  // Virtual Laser Tape Measure state
+  double _accelX = 0, _accelY = 0, _accelZ = 9.8;
+  double _magX = 0, _magY = 1, _magZ = 0;
+  double _pitchDeg = 0.0;
+  double _rollDeg = 0.0;
+  double _headingDeg = 342.0;
+  String _cardinalDirection = 'NW';
+  DateTime _lastSensorUpdate = DateTime.now();
+
+  // Model & AR Spatial State
+  ARModelTarget _selectedModel = ARModelTarget.neferGuide;
+  double _scaleMultiplier = 1.0;
+  double _rotationAngle = 45.0; // 0 to 360 deg
+  double _sunHour = 14.0; // 7:00 to 18:00
+  String _statusMessage = 'Spatial 3D Studio Active • 1:1 Human Avatar (1.65m)';
+
+  // Virtual Laser Tape Measure
   bool _tapeMeasureActive = false;
   Offset? _tapePointA;
   Offset? _tapePointB;
@@ -49,88 +62,159 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
   @override
   void initState() {
     super.initState();
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android && defaultTargetPlatform != TargetPlatform.iOS) {
-      _isSpatialStudioMode = true;
+    _initSensors();
+    // Only attempt camera init if supported platform or user toggles CAM AR
+    if (!kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS)) {
+      _initCamera();
     }
   }
 
-  void _onARViewCreated(
-    ARSessionManager sessionManager,
-    ARObjectManager objectManager,
-    ARAnchorManager anchorManager,
-    ARLocationManager locationManager,
-  ) {
-    _sessionManager = sessionManager;
-    _objectManager = objectManager;
-
-    sessionManager.onInitialize(
-      showFeaturePoints: false,
-      showPlanes: true,
-      showWorldOrigin: false,
-      handleTaps: true,
-      handlePans: true,
-      handleRotation: true,
-    );
-
-    objectManager.onInitialize();
-    sessionManager.onPlaneOrPointTap = _onPlaneTapped;
-  }
-
-  Future<void> _onPlaneTapped(List<ARHitTestResult> hitTestResults) async {
-    if (_housePlaced || _isLoading || hitTestResults.isEmpty) return;
-
-    setState(() {
-      _isLoading = true;
-      _statusMessage = 'Anchoring structural BIM model to physical plane...';
-    });
-
+  Future<void> _initCamera() async {
     try {
-      final hit = hitTestResults.first;
-      final translation = hit.worldTransform.getTranslation();
-
-      final node = ARNode(
-        type: NodeType.fileSystemAppFolderGLB,
-        uri: AppStrings.modelHouseArGlb,
-        name: 'HouseVisionModel',
-        scale: vector.Vector3(0.05 * _scaleMultiplier, 0.05 * _scaleMultiplier, 0.05 * _scaleMultiplier),
-        position: vector.Vector3(translation.x, translation.y + _elevationHeight, translation.z),
-        rotation: vector.Vector4(0, 1, 0, _rotationAngle * (pi / 180.0)),
-      );
-
-      final added = await _objectManager?.addNode(node);
-      if (added == true) {
-        _houseNode = node;
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
         if (mounted) {
           setState(() {
-            _housePlaced = true;
-            _statusMessage = 'BIM Model Anchored. 3D Spatial Gizmos Active.';
+            _cameraError = true;
+            _cameraErrorMsg = 'No camera sensor detected.';
+            _isCameraMode = false;
           });
         }
+        return;
       }
+
+      final backCamera = cameras.firstWhere(
+        (cam) => cam.lensDirection == CameraLensDirection.back,
+        orElse: () => cameras.first,
+      );
+
+      final controller = CameraController(
+        backCamera,
+        ResolutionPreset.high,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
+      );
+
+      await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+
+      setState(() {
+        _cameraController = controller;
+        _isCameraReady = true;
+        _isCameraMode = true;
+        _statusMessage = 'Live Camera Feed Active • 1:1 Human Scale Anchor';
+      });
     } catch (e) {
-      debugPrint('[ARHouseScreen] Fallback to Spatial Studio: $e');
+      debugPrint('[ARHouseScreen] Camera init fallback: $e');
       if (mounted) {
         setState(() {
-          _isSpatialStudioMode = true;
-          _statusMessage = 'Physical plane sensor offline. Switched to Spatial AR Studio.';
+          _cameraError = true;
+          _cameraErrorMsg = 'Camera unavailable: $e';
+          _isCameraMode = false;
+          _statusMessage = 'Operating in High-Precision Spatial Studio Mode.';
         });
       }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _resetHouse() async {
-    if (_houseNode != null) {
-      await _objectManager?.removeNode(_houseNode!);
-      _houseNode = null;
+  void _initSensors() {
+    if (!kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS)) {
+      try {
+        _accelSub = accelerometerEventStream(samplingPeriod: SensorInterval.uiInterval).listen(
+          (event) {
+            _accelX = event.x;
+            _accelY = event.y;
+            _accelZ = event.z;
+            _processSensors();
+          },
+          onError: (_) => _startSimulatedSensors(),
+        );
+
+        _magSub = magnetometerEventStream(samplingPeriod: SensorInterval.uiInterval).listen(
+          (event) {
+            _magX = event.x;
+            _magY = event.y;
+            _magZ = event.z;
+            _processSensors();
+          },
+          onError: (_) {},
+        );
+
+        _gyroSub = gyroscopeEventStream(samplingPeriod: SensorInterval.uiInterval).listen(
+          (_) {},
+          onError: (_) {},
+        );
+      } catch (_) {
+        _startSimulatedSensors();
+      }
+    } else {
+      _startSimulatedSensors();
     }
+  }
+
+  void _startSimulatedSensors() {
+    _simulatedSensorTimer?.cancel();
+    _simulatedSensorTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted) {
+        setState(() {
+          _headingDeg = (338 + (DateTime.now().second % 10)).toDouble();
+          _cardinalDirection = _getCardinal(_headingDeg);
+        });
+      }
+    });
+  }
+
+  void _processSensors() {
+    final now = DateTime.now();
+    if (now.difference(_lastSensorUpdate).inMilliseconds < 33) return; // 30Hz throttle
+    _lastSensorUpdate = now;
+
+    final pitchRad = atan2(-_accelX, sqrt(_accelY * _accelY + _accelZ * _accelZ));
+    final rollRad = atan2(_accelY, _accelZ);
+
+    final pitch = pitchRad * (180.0 / pi);
+    final roll = rollRad * (180.0 / pi);
+
+    final cosPitch = cos(pitchRad);
+    final sinPitch = sin(pitchRad);
+    final cosRoll = cos(rollRad);
+    final sinRoll = sin(rollRad);
+
+    final xh = _magX * cosPitch + _magZ * sinPitch;
+    final yh = _magX * sinRoll * sinPitch + _magY * cosRoll - _magZ * sinRoll * cosPitch;
+
+    var rawHeading = atan2(-yh, xh) * (180.0 / pi);
+    if (rawHeading < 0) rawHeading += 360.0;
+
+    var diff = rawHeading - _headingDeg;
+    if (diff > 180) diff -= 360;
+    if (diff < -180) diff += 360;
+    final smoothedHeading = (_headingDeg + 0.15 * diff + 360) % 360;
+
+    final cardinal = _getCardinal(smoothedHeading);
+
     if (mounted) {
       setState(() {
-        _housePlaced = false;
-        _statusMessage = 'Tap surface plane to re-anchor BIM model.';
+        _pitchDeg = pitch;
+        _rollDeg = roll;
+        _headingDeg = smoothedHeading;
+        _cardinalDirection = cardinal;
       });
     }
+  }
+
+  String _getCardinal(double degrees) {
+    if (degrees >= 337.5 || degrees < 22.5) return 'N';
+    if (degrees >= 22.5 && degrees < 67.5) return 'NE';
+    if (degrees >= 67.5 && degrees < 112.5) return 'E';
+    if (degrees >= 112.5 && degrees < 157.5) return 'SE';
+    if (degrees >= 157.5 && degrees < 202.5) return 'S';
+    if (degrees >= 202.5 && degrees < 247.5) return 'SW';
+    if (degrees >= 247.5 && degrees < 292.5) return 'W';
+    return 'NW';
   }
 
   void _handleScreenTap(TapDownDetails details) {
@@ -143,14 +227,12 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
         _measuredDistanceMeters = null;
       } else if (_tapePointB == null) {
         _tapePointB = details.localPosition;
-        // Vector distance calculation
         final dx = _tapePointB!.dx - _tapePointA!.dx;
         final dy = _tapePointB!.dy - _tapePointA!.dy;
         final pixelDistance = sqrt(dx * dx + dy * dy);
-        // Scale to simulated site meters (approx 40px per meter)
-        _measuredDistanceMeters = (pixelDistance / 42.0) * (1.0 / _scaleMultiplier);
+        final pxPerMeter = _selectedModel == ARModelTarget.neferGuide ? 160.0 : 42.0;
+        _measuredDistanceMeters = (pixelDistance / pxPerMeter) * (1.0 / _scaleMultiplier);
       } else {
-        // Reset and start new measurement
         _tapePointA = details.localPosition;
         _tapePointB = null;
         _measuredDistanceMeters = null;
@@ -166,9 +248,25 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
     });
   }
 
+  void _resetPlacement() {
+    setState(() {
+      _rotationAngle = 45.0;
+      _scaleMultiplier = 1.0;
+      _sunHour = 14.0;
+      _resetTapeMeasure();
+      _statusMessage = _selectedModel == ARModelTarget.neferGuide
+          ? 'Nefer AI Assistant reset to 1:1 Human Scale (1.65m).'
+          : 'BIM Model reset to default spatial datum.';
+    });
+  }
+
   @override
   void dispose() {
-    _sessionManager?.dispose();
+    _accelSub?.cancel();
+    _magSub?.cancel();
+    _gyroSub?.cancel();
+    _simulatedSensorTimer?.cancel();
+    _cameraController?.dispose();
     super.dispose();
   }
 
@@ -183,13 +281,11 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
       appBar: AppBar(
         title: const Text('AR Site Projector'),
         actions: [
-          // Reset Placement
           IconButton(
-            tooltip: 'Reset Plane Placement',
+            tooltip: 'Reset Spatial Placement',
             icon: const Icon(Icons.refresh_rounded),
-            onPressed: _resetHouse,
+            onPressed: _resetPlacement,
           ),
-          // Tape measure toggle
           IconButton(
             tooltip: 'Virtual Laser Tape Measure',
             icon: Icon(
@@ -203,81 +299,229 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
               });
             },
           ),
-          // Mode switch
-          IconButton(
-            tooltip: _isSpatialStudioMode ? 'Switch to Camera AR' : 'Switch to Spatial Studio',
-            icon: Icon(
-              _isSpatialStudioMode ? Icons.view_in_ar_rounded : Icons.apartment_rounded,
-              color: AppColors.primary,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () {
+                if (!_isCameraMode && _cameraController == null && !_cameraError) {
+                  _initCamera();
+                }
+                setState(() => _isCameraMode = !_isCameraMode);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: (_isCameraMode ? AppColors.primary : AppColors.accentOrange).withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: _isCameraMode ? AppColors.primary : AppColors.accentOrange,
+                    width: 1.2,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _isCameraMode ? Icons.camera_alt_rounded : Icons.apartment_rounded,
+                      size: 16,
+                      color: _isCameraMode ? AppColors.primary : AppColors.accentOrange,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _isCameraMode ? 'CAM AR' : 'STUDIO',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: _isCameraMode ? AppColors.primary : AppColors.accentOrange,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-            onPressed: () {
-              setState(() => _isSpatialStudioMode = !_isSpatialStudioMode);
-            },
           ),
         ],
       ),
       body: Stack(
         children: [
-          // Main 3D Viewport
-          _isSpatialStudioMode
-              ? Stack(
-                  children: [
-                    // Simulated Architectural Ground Plane Grid
-                    Positioned.fill(
-                      child: CustomPaint(
-                        painter: _SpatialGroundGridPainter(
-                          rotationDeg: _rotationAngle,
-                          shadowOffset: Offset(shadowOffsetX, shadowOffsetY),
-                          scaleFactor: _scaleMultiplier,
+          // Background Layer 1: Live Optical Camera (CAM AR Mode) or Dark Studio Grid
+          if (_isCameraMode && _isCameraReady && _cameraController != null)
+            Positioned.fill(
+              child: ClipRect(
+                child: OverflowBox(
+                  alignment: Alignment.center,
+                  child: FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: _cameraController!.value.previewSize?.height ?? 1080,
+                      height: _cameraController!.value.previewSize?.width ?? 1920,
+                      child: CameraPreview(_cameraController!),
+                    ),
+                  ),
+                ),
+              ),
+            )
+          else if (_isCameraMode && !_isCameraReady)
+            Positioned.fill(
+              child: Container(
+                color: const Color(0xFF0F172A),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(color: AppColors.primary),
+                      const SizedBox(height: 14),
+                      Text(
+                        _cameraError ? _cameraErrorMsg : 'STARTING OPTICAL AR CAMERA...',
+                        style: const TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 11,
+                          letterSpacing: 1,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                    ),
-
-                    // 3D House Model Renderer
-                    const Positioned.fill(
-                      child: ModelViewer(
-                        src: AppStrings.modelHouseArGlb,
-                        alt: 'BIM Spatial Model',
-                        autoRotate: false,
-                        cameraControls: true,
-                        backgroundColor: Colors.transparent,
-                      ),
-                    ),
-                  ],
-                )
-              : ARView(
-                  onARViewCreated: _onARViewCreated,
-                  planeDetectionConfig: PlaneDetectionConfig.horizontal,
+                    ],
+                  ),
                 ),
+              ),
+            )
+          else
+            // STUDIO Mode: High-Precision Architectural Perspective Grid
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _SpatialGroundGridPainter(
+                  rotationDeg: _rotationAngle,
+                  shadowOffset: Offset(shadowOffsetX, shadowOffsetY),
+                  scaleFactor: _scaleMultiplier,
+                ),
+              ),
+            ),
 
-          // Top HUD Telemetry Bar
-          const Positioned(
+          // Background Layer 2: Simulated Holographic Ground Anchor in CAM AR mode
+          if (_isCameraMode)
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _CamFloorAnchorPainter(
+                  pitch: _pitchDeg,
+                  roll: _rollDeg,
+                  scale: _scaleMultiplier,
+                ),
+              ),
+            ),
+
+          // Layer 3: Interactive 3D Model Viewport (Transparent ModelViewer)
+          Positioned.fill(
+            child: KeyedSubtree(
+              key: ValueKey(_selectedModel),
+              child: ModelViewer(
+                src: _selectedModel == ARModelTarget.neferGuide
+                    ? AppStrings.modelNeferGlb
+                    : AppStrings.modelHouseArGlb,
+                alt: _selectedModel == ARModelTarget.neferGuide
+                    ? 'Nefer • AI Site Assistant & BIM Guide'
+                    : 'BIM Spatial Model',
+                autoRotate: false,
+                cameraControls: true,
+                backgroundColor: Colors.transparent,
+                ar: true,
+                arModes: const ['scene-viewer', 'webxr', 'quick-look'],
+                arScale: ArScale.auto,
+                arPlacement: ArPlacement.floor,
+                innerModelViewerHtml: '''
+                  <button slot="ar-button" id="ar-button" style="position: absolute; bottom: 190px; right: 20px; background: linear-gradient(135deg, #00E5FF, #0077FF); color: #000; border: none; padding: 12px 20px; border-radius: 26px; font-weight: 800; font-size: 13px; letter-spacing: 0.5px; box-shadow: 0 4px 18px rgba(0,229,255,0.55); display: flex; align-items: center; gap: 8px; cursor: pointer; z-index: 99999;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4c0-1.1.9-2 2-2h4v2H5v4H3V4zm0 16c0 1.1.9 2 2 2h4v-2H5v-4H3v4zm16 2c1.1 0 2-.9 2-2v-4h-2v4h-4v2h4zm2-18c0-1.1-.9-2-2-2h-4v2h4v4h2V4zm-9 4l5 3v6l-5 3-5-3v-6l5-3z"/></svg>
+                    VIEW IN ROOM (AR)
+                  </button>
+                ''',
+              ),
+            ),
+          ),
+
+          // Layer 4: Top HUD Telemetry Bar (Live Compass, Cardinal & LiDAR)
+          Positioned(
             top: 12,
             left: 16,
             right: 16,
             child: HudTelemetryBar(
-              siteTag: 'AR SPATIAL PROJECTOR • BIM LOD 400',
+              siteTag: _selectedModel == ARModelTarget.neferGuide
+                  ? 'NEFER AI GUIDE • SPATIAL HUMAN ANCHOR'
+                  : 'AR SPATIAL PROJECTOR • BIM LOD 400',
               coordinates: '11°01\'24.8"N 76°58\'12.4"E',
               isLiDarActive: true,
+              headingDegrees: _headingDeg.round(),
+              cardinalDirection: _cardinalDirection,
             ),
           ),
 
-          // Status & Tooltip Pill
+          // Layer 5: Dual Model Selector (Nefer AI Guide vs BIM House)
           Positioned(
-            top: 62,
+            top: 60,
             left: 16,
             right: 16,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              padding: const EdgeInsets.all(3),
               decoration: BoxDecoration(
-                color: AppColors.surface.withValues(alpha: 0.9),
+                color: AppColors.surface.withValues(alpha: 0.94),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.borderHighlight),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _buildModelTab(
+                      title: 'Nefer (AI Guide)',
+                      subtitle: '1:1 Human Avatar (10MB)',
+                      icon: Icons.person_rounded,
+                      isSelected: _selectedModel == ARModelTarget.neferGuide,
+                      onTap: () {
+                        setState(() {
+                          _selectedModel = ARModelTarget.neferGuide;
+                          _scaleMultiplier = 1.0;
+                          _statusMessage = 'Nefer AI Assistant anchored at 1:1 Human Scale (1.65m)';
+                          _resetTapeMeasure();
+                        });
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: _buildModelTab(
+                      title: 'BIM House (Site)',
+                      subtitle: 'Architectural LOD 400',
+                      icon: Icons.apartment_rounded,
+                      isSelected: _selectedModel == ARModelTarget.bimHouse,
+                      onTap: () {
+                        setState(() {
+                          _selectedModel = ARModelTarget.bimHouse;
+                          _scaleMultiplier = 1.0;
+                          _statusMessage = 'Architectural BIM Model loaded (1:50 Site Scale)';
+                          _resetTapeMeasure();
+                        });
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Layer 6: Status & Attitude Telemetry Pill
+          Positioned(
+            top: 108,
+            left: 16,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              decoration: BoxDecoration(
+                color: AppColors.surface.withValues(alpha: 0.92),
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: AppColors.borderHighlight),
               ),
               child: Row(
                 children: [
                   Icon(
-                    _tapeMeasureActive ? Icons.straighten : Icons.grid_4x4_rounded,
+                    _tapeMeasureActive ? Icons.straighten : Icons.sensors_rounded,
                     size: 16,
                     color: _tapeMeasureActive ? AppColors.accentOrange : AppColors.primary,
                   ),
@@ -290,10 +534,10 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
                               : (_tapePointB == null
                                   ? 'Tap Point B to measure span'
                                   : 'Span: ${_measuredDistanceMeters!.toStringAsFixed(2)}m (${(_measuredDistanceMeters! * 3.28084).toStringAsFixed(1)} ft)'))
-                          : _statusMessage,
+                          : '$_statusMessage • Tilt: ${_pitchDeg.round()}°',
                       style: TextStyle(
                         color: _tapeMeasureActive ? AppColors.accentOrange : AppColors.textPrimary,
-                        fontSize: 12,
+                        fontSize: 11.5,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -314,7 +558,7 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
             ),
           ),
 
-          // Virtual Tape Measure Gesture & Laser Painter Overlay
+          // Layer 7: Virtual Tape Measure Interactive Gesture & Canvas Overlay
           if (_tapeMeasureActive)
             Positioned.fill(
               child: GestureDetector(
@@ -330,7 +574,7 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
               ),
             ),
 
-          // Bottom 3D Spatial Gizmo Controls Dock
+          // Layer 8: Bottom 3D Spatial Gizmo Controls Dock
           Positioned(
             bottom: 16,
             left: 16,
@@ -360,26 +604,40 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
                         style: TextStyle(color: AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(width: 10),
-                      _buildScaleChip('1:100 Tabletop', 0.5),
-                      const SizedBox(width: 8),
-                      _buildScaleChip('1:50 Model', 1.0),
-                      const SizedBox(width: 8),
-                      _buildScaleChip('1:20 Site', 2.0),
-                      const SizedBox(width: 8),
-                      _buildScaleChip('1:1 True', 5.0),
+                      if (_selectedModel == ARModelTarget.neferGuide) ...[
+                        _buildScaleChip('1:10 Desk', 0.1),
+                        const SizedBox(width: 8),
+                        _buildScaleChip('1:5 Mini', 0.2),
+                        const SizedBox(width: 8),
+                        _buildScaleChip('1:2 Half', 0.5),
+                        const SizedBox(width: 8),
+                        _buildScaleChip('1:1 Human', 1.0),
+                      ] else ...[
+                        _buildScaleChip('1:100 Tabletop', 0.5),
+                        const SizedBox(width: 8),
+                        _buildScaleChip('1:50 Model', 1.0),
+                        const SizedBox(width: 8),
+                        _buildScaleChip('1:20 Site', 2.0),
+                        const SizedBox(width: 8),
+                        _buildScaleChip('1:1 True', 5.0),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 12),
 
-                  // Row 2: Rotation & Elevation Sliders
+                  // Row 2: Rotation & Sun/Shadow Sliders
                   Row(
                     children: [
-                      // Rotation
                       const Icon(Icons.rotate_right_rounded, size: 16, color: AppColors.primary),
                       const SizedBox(width: 6),
                       Text(
                         '${_rotationAngle.toInt()}°',
-                        style: const TextStyle(color: AppColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w600, fontFamily: 'monospace'),
+                        style: const TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'monospace',
+                        ),
                       ),
                       Expanded(
                         child: Slider(
@@ -390,13 +648,16 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
                         ),
                       ),
                       const SizedBox(width: 12),
-
-                      // Sun Angle (Shadow study)
                       const Icon(Icons.wb_sunny_outlined, size: 16, color: AppColors.accentOrange),
                       const SizedBox(width: 6),
                       Text(
                         '${_sunHour.toInt()}:00',
-                        style: const TextStyle(color: AppColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w600, fontFamily: 'monospace'),
+                        style: const TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'monospace',
+                        ),
                       ),
                       Expanded(
                         child: Slider(
@@ -418,7 +679,7 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
   }
 
   Widget _buildScaleChip(String label, double scaleVal) {
-    final isSelected = (_scaleMultiplier - scaleVal).abs() < 0.1;
+    final isSelected = (_scaleMultiplier - scaleVal).abs() < 0.05;
     return Expanded(
       child: InkWell(
         onTap: () => setState(() => _scaleMultiplier = scaleVal),
@@ -437,7 +698,7 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
             label,
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 11,
+              fontSize: 10.5,
               fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
               color: isSelected ? AppColors.primary : AppColors.textSecondary,
             ),
@@ -446,9 +707,130 @@ class _ARHouseScreenState extends State<ARHouseScreen> with SingleTickerProvider
       ),
     );
   }
+
+  Widget _buildModelTab({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(9),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.primary.withValues(alpha: 0.18) : Colors.transparent,
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(
+            color: isSelected ? AppColors.primary : Colors.transparent,
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 15,
+              color: isSelected ? AppColors.primary : AppColors.textMuted,
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: isSelected ? AppColors.textPrimary : AppColors.textSecondary,
+                      fontSize: 11,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: isSelected ? AppColors.primary : AppColors.textMuted,
+                      fontSize: 9,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-/// Custom painter that renders the simulated perspective architectural ground grid and shadows.
+/// Holographic floor anchor painter for CAM AR mode
+class _CamFloorAnchorPainter extends CustomPainter {
+  final double pitch;
+  final double roll;
+  final double scale;
+
+  _CamFloorAnchorPainter({
+    required this.pitch,
+    required this.roll,
+    required this.scale,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height * 0.72);
+
+    final ringPaint = Paint()
+      ..color = const Color(0xFF00E5FF).withValues(alpha: 0.28)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+
+    final glowPaint = Paint()
+      ..color = const Color(0xFF00E5FF).withValues(alpha: 0.08)
+      ..style = PaintingStyle.fill;
+
+    canvas.drawOval(
+      Rect.fromCenter(center: center, width: 260 * scale.clamp(0.4, 2.0), height: 90 * scale.clamp(0.4, 2.0)),
+      glowPaint,
+    );
+    canvas.drawOval(
+      Rect.fromCenter(center: center, width: 260 * scale.clamp(0.4, 2.0), height: 90 * scale.clamp(0.4, 2.0)),
+      ringPaint,
+    );
+
+    final innerRingPaint = Paint()
+      ..color = const Color(0xFF00E5FF).withValues(alpha: 0.4)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0;
+
+    canvas.drawOval(
+      Rect.fromCenter(center: center, width: 140 * scale.clamp(0.4, 2.0), height: 50 * scale.clamp(0.4, 2.0)),
+      innerRingPaint,
+    );
+
+    final crossPaint = Paint()
+      ..color = const Color(0xFF00E5FF).withValues(alpha: 0.5)
+      ..strokeWidth = 1.0;
+
+    canvas.drawLine(Offset(center.dx - 18, center.dy), Offset(center.dx + 18, center.dy), crossPaint);
+    canvas.drawLine(Offset(center.dx, center.dy - 10), Offset(center.dx, center.dy + 10), crossPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _CamFloorAnchorPainter oldDelegate) {
+    return oldDelegate.pitch != pitch || oldDelegate.roll != roll || oldDelegate.scale != scale;
+  }
+}
+
+/// Perspective architectural ground grid and shadow footprint for STUDIO Mode
 class _SpatialGroundGridPainter extends CustomPainter {
   final double rotationDeg;
   final Offset shadowOffset;
@@ -464,7 +846,6 @@ class _SpatialGroundGridPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height * 0.62);
 
-    // Draw simulated shadow footprint
     final shadowPaint = Paint()
       ..color = Colors.black.withValues(alpha: 0.55)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 16);
@@ -476,7 +857,6 @@ class _SpatialGroundGridPainter extends CustomPainter {
     );
     canvas.drawOval(shadowRect, shadowPaint);
 
-    // Draw perspective site grid
     final gridPaint = Paint()
       ..color = const Color(0xFF00D2FF).withValues(alpha: 0.12)
       ..strokeWidth = 1.0;
@@ -497,7 +877,6 @@ class _SpatialGroundGridPainter extends CustomPainter {
       );
     }
 
-    // Concentric spatial rings
     final ringPaint = Paint()
       ..color = const Color(0xFF00D2FF).withValues(alpha: 0.22)
       ..style = PaintingStyle.stroke
@@ -515,7 +894,7 @@ class _SpatialGroundGridPainter extends CustomPainter {
   }
 }
 
-/// Custom painter for the Virtual Laser Tape Measure.
+/// Virtual Laser Tape Measure Canvas Painter
 class _TapeMeasureLaserPainter extends CustomPainter {
   final Offset? pointA;
   final Offset? pointB;
@@ -540,16 +919,13 @@ class _TapeMeasureLaserPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.0;
 
-    // Draw Point A crosshairs
     canvas.drawCircle(pointA!, 5, dotPaint);
     canvas.drawCircle(pointA!, 12, ringPaint);
 
     if (pointB != null) {
-      // Draw Point B crosshairs
       canvas.drawCircle(pointB!, 5, dotPaint);
       canvas.drawCircle(pointB!, 12, ringPaint);
 
-      // Laser line
       final laserPaint = Paint()
         ..color = AppColors.accentOrange
         ..strokeWidth = 2.0
@@ -557,9 +933,8 @@ class _TapeMeasureLaserPainter extends CustomPainter {
 
       canvas.drawLine(pointA!, pointB!, laserPaint);
 
-      // Distance tag pill at line midpoint
       final mid = Offset((pointA!.dx + pointB!.dx) / 2, (pointA!.dy + pointB!.dy) / 2);
-      final distText = '${distanceMeters?.toStringAsFixed(2) ?? '0.00'} m';
+      final distText = '${distanceMeters?.toStringAsFixed(2) ?? "0.00"} m';
 
       final textSpan = TextSpan(
         text: distText,

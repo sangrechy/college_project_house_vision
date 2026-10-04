@@ -8,12 +8,16 @@ class HudTelemetryBar extends StatefulWidget {
   final String siteTag;
   final String coordinates;
   final bool isLiDarActive;
+  final int? headingDegrees;
+  final String? cardinalDirection;
 
   const HudTelemetryBar({
     super.key,
     this.siteTag = 'SECTOR 4A • STRUCTURAL',
     this.coordinates = '11°01\'24"N 76°58\'12"E',
     this.isLiDarActive = true,
+    this.headingDegrees,
+    this.cardinalDirection,
   });
 
   @override
@@ -27,9 +31,9 @@ class _HudTelemetryBarState extends State<HudTelemetryBar> {
   @override
   void initState() {
     super.initState();
-    // Simulate live compass micro-drift
+    // Simulate live compass micro-drift if no real hardware sensor provided
     _timer = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (mounted) {
+      if (mounted && widget.headingDegrees == null) {
         setState(() {
           _heading = 340 + (DateTime.now().second % 6);
         });
@@ -100,7 +104,7 @@ class _HudTelemetryBarState extends State<HudTelemetryBar> {
               ),
               const SizedBox(width: 4),
               Text(
-                '$_heading° NW',
+                '${widget.headingDegrees ?? _heading}° ${widget.cardinalDirection ?? "NW"}',
                 style: const TextStyle(
                   color: AppColors.textPrimary,
                   fontSize: 10.5,
